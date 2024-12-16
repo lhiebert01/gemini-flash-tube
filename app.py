@@ -496,16 +496,16 @@ def main():
     """, unsafe_allow_html=True)
 
     # Quick Guide in expander
-   with st.expander("ℹ️ How to Use"):
-        st.markdown("""
-        1. 🔑 Get your API key from [Google AI Studio](https://aistudio.google.com/apikey)
-        2. 🔒 Enter your API key in the field above
-        3. 🔗 Paste a YouTube URL below
-        4. 🚀 Click 'Generate Detailed Notes'
-        5. 📝 Get AI-powered summary and insights
-        6. ❓ Ask questions about the content
-        7. 📥 Download in Markdown or Word format
-        """)
+    with st.expander("ℹ️ How to Use"):
+            st.markdown("""
+            1. 🔑 Get your API key from [Google AI Studio](https://aistudio.google.com/apikey)
+            2. 🔒 Enter your API key in the field above
+            3. 🔗 Paste a YouTube URL below
+            4. 🚀 Click 'Generate Detailed Notes'
+            5. 📝 Get AI-powered summary and insights
+            6. ❓ Ask questions about the content
+            7. 📥 Download in Markdown or Word format
+            """)
 
     # Rest of your code continues here...
     youtube_link = st.text_input("🎥 Enter YouTube Video Link:", placeholder="https://www.youtube.com/watch?v=...")
