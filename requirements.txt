@@ -1,0 +1,9 @@
+youtube_transcript_api
+streamlit
+google-generativeai
+python-dotenv
+pathlib
+python-docx
+python-pptx
+beautifulsoup4
+requests
