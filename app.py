@@ -42,8 +42,8 @@ if "qa_history" not in st.session_state:
 
 
 # Load environment variables and configure Gemini
-load_dotenv(override=True)
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+#load_dotenv(override=True)
+#genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Constants for prompts
 CHUNK_PROMPT = """Analyze this portion of the video transcript and provide:
@@ -147,6 +147,9 @@ def generate_content(text, prompt, retry_count=3):
             response = model.generate_content(prompt + text)
             return response.text
         except Exception as e:
+            if "API key not valid" in str(e):
+                st.error("❌ Invalid API key. Please check your key and try again.")
+                st.stop()
             if attempt == retry_count - 1:
                 st.error(f"Error generating content: {str(e)}")
                 return None
@@ -441,6 +444,45 @@ def main():
     }
     </style>
     """, unsafe_allow_html=True)
+    
+    
+    # Add API Key Section
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem;">
+        <h1 class="main-title">🎯 Gemini Flash YouTube Video Summary App</h1>
+        <p class="subtitle">AI-Powered Video Analysis & Summarization</p>
+        <div style="margin-top: 1rem;">
+            <a href="https://www.linkedin.com/in/lindsayhiebert/" class="linkedin-link">By Lindsay Hiebert</a>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # API Key Instructions and Input
+# API Key Instructions and Input
+    st.markdown("""
+    ### 🔑 API Key Required
+    1. Get your API key from [Google AI Studio](https://aistudio.google.com/apikey)
+    2. Copy and paste your key below
+    """)
+    
+    api_key = st.text_input("Enter your Google AI API Key:", type="password")
+    
+    # Add Privacy Notice right here, after the API key input
+    st.markdown("""
+    <div style="background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0;">
+        <p style="font-size: 0.8rem; color: #666;">
+        🔒 <strong>Privacy Notice:</strong> Your API key is used only for processing requests and is never stored. 
+        Each user must provide their own API key for security reasons.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if not api_key:
+        st.warning("⚠️ Please enter your Google AI API key to use this application. Get your key from [Google AI Studio](https://aistudio.google.com/apikey)")
+        st.stop()  # Stop execution if no API key is provided
+    
+    # Configure Gemini with user's API key
+    genai.configure(api_key=api_key)
 
     # Single compact header
     st.markdown("""
@@ -454,13 +496,15 @@ def main():
     """, unsafe_allow_html=True)
 
     # Quick Guide in expander
-    with st.expander("ℹ️ How to Use"):
+   with st.expander("ℹ️ How to Use"):
         st.markdown("""
-        1. 🔗 Paste a YouTube URL below
-        2. 🚀 Click 'Generate Detailed Notes'
-        3. 📝 Get AI-powered summary and insights
-        4. ❓ Ask questions about the content
-        5. 📥 Download in Markdown or Word format
+        1. 🔑 Get your API key from [Google AI Studio](https://aistudio.google.com/apikey)
+        2. 🔒 Enter your API key in the field above
+        3. 🔗 Paste a YouTube URL below
+        4. 🚀 Click 'Generate Detailed Notes'
+        5. 📝 Get AI-powered summary and insights
+        6. ❓ Ask questions about the content
+        7. 📥 Download in Markdown or Word format
         """)
 
     # Rest of your code continues here...
