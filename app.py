@@ -17,6 +17,10 @@ import re
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
+import time
+
+RETRY_COUNT = 4
+RETRY_DELAY = 3
 
 # Must be the first Streamlit command
 st.set_page_config(
@@ -197,95 +201,26 @@ def get_youtube_video_id(url):
     
     return None
 
-import googleapiclient.discovery
 
-def get_youtube_title(video_id):
-    """Fetch video title using YouTube Data API v3."""
+def get_youtube_title(video_id, youtube_link):
+    """
+    Fetch video title using YouTube Data API v3.
+    If title is unavailable, fallback to using the video ID.
+    """
+    fallback_title = f"Video ID: {video_id} (Title: {youtube_link})"
     try:
-        api_service_name = "youtube"
-        api_version = "v3"
-        youtube_api_key = os.getenv("YOUTUBE_API_KEY")
-
         youtube = googleapiclient.discovery.build(
-            api_service_name, api_version, developerKey=youtube_api_key
+            "youtube", "v3", developerKey=os.getenv("YOUTUBE_API_KEY")
         )
+        response = youtube.videos().list(part="snippet", id=video_id).execute()
 
-        request = youtube.videos().list(part="snippet", id=video_id)
-        response = request.execute()
+        title = response.get("items", [{}])[0].get("snippet", {}).get("title")
+        return title if title else fallback_title
+    except Exception:
+        st.warning("⚠️ Error retrieving video title. Falling back to Video ID.")
+        return fallback_title
 
-        if "items" not in response or not response["items"]:
-            st.error("No video data found. Please check the video ID or URL.")
-            return None
-
-        title = response["items"][0]["snippet"]["title"]
-        return title
-    except googleapiclient.errors.HttpError as e:
-        if e.resp.status == 403:
-            st.error("YouTube API rate limit exceeded. Try again later.")
-        else:
-            st.error(f"An error occurred: {e}")
-        return None
-    except Exception as e:
-        st.warning(f"⚠️ Could not retrieve video title: {str(e)}")
-        return None
-
-
-def extract_transcript(video_id):
-    """
-    Enhanced transcript extraction with multiple fallback methods and improved error handling.
-    """
-    try:
-        # First attempt: Default transcript
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        except Exception as e:
-            # Second attempt: Try with auto-generated transcripts
-            try:
-                transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB', 'auto'])
-            except Exception as inner_e:
-                # Third attempt: Try with manual transcripts
-                try:
-                    available_transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-                    transcript_list = available_transcripts.find_transcript(['en']).fetch()
-                except Exception as final_e:
-                    # If all attempts fail, raise a user-friendly error
-                    st.error("❌ Unable to access video transcript")
-                    st.info("""
-                    💡 This could be because:
-                    - The video doesn't have subtitles/closed captions enabled
-                    - The video is using embedded/burned-in subtitles
-                    - The video might be age-restricted or private
-                    
-                    Try these solutions:
-                    1. Choose a similar video that has closed captions enabled
-                    2. Check if the video has manual captions available
-                    3. Verify the video is publicly accessible
-                    """)
-                    return None
-
-        # If we got the transcript, format it
-        formatted_transcript = ""
-        for item in transcript_list:
-            timestamp = int(item["start"])
-            time_str = f"[{timestamp//3600:02d}:{(timestamp%3600)//60:02d}:{timestamp%60:02d}]"
-            formatted_transcript += f"{time_str} {item['text']} "
-            
-        return formatted_transcript.strip()
-        
-    except Exception as e:
-        st.error(f"❌ Error accessing video: {str(e)}")
-        st.info("""
-        💡 Please verify:
-        - The URL is correct
-        - The video is publicly available
-        - You're using a supported URL format
-        
-        Supported formats:
-        - youtube.com/watch?v=...
-        - youtu.be/...
-        - m.youtube.com/watch?v=...
-        """)
-        return None
+    
     
 def process_video_url(youtube_link):
     """
@@ -295,32 +230,30 @@ def process_video_url(youtube_link):
     if not youtube_link:
         st.warning("⚠️ Please enter a YouTube URL")
         return None, None
-        
+
     # Clean the URL
     youtube_link = youtube_link.strip()
     
     # Extract video ID
     video_id = get_youtube_video_id(youtube_link)
     if not video_id:
-        st.error("❌ Invalid YouTube URL format")
-        st.info("💡 Please make sure to use a valid YouTube URL.\n" +
-                "Supported formats:\n" +
-                "- youtube.com/watch?v=...\n" +
-                "- youtu.be/...\n" +
-                "- m.youtube.com/watch?v=...")
+        st.error("❌ Unable to extract Video ID. Please check the URL format.")
+        st.info("💡 Supported formats:\n- youtube.com/watch?v=...\n- youtu.be/...\n- m.youtube.com/watch?v=...")
         return None, None
-        
+
     # Get video title
-    video_title = get_youtube_title(video_id)
+    video_title = get_youtube_title(video_id, youtube_link)
     if not video_title:
-        st.warning("⚠️ Could not retrieve video title, but proceeding with analysis...")
-    
+        st.warning("⚠️ Could not retrieve video title. Defaulting to video ID.")
+
     # Get transcript
     transcript = extract_transcript(video_id)
     if not transcript:
         return None, None
         
     return video_id, transcript
+
+
 
 # Part 3: Text Processing and Content Generation Functions
 
@@ -356,6 +289,48 @@ def format_response(response_text):
     cleaned = re.sub(r'(?m)^\s*[-•]\s*', '- ', cleaned)
     
     return cleaned
+
+ 
+
+def retry_transcript_extraction(video_id, retries=RETRY_COUNT, delay=RETRY_DELAY):
+    """
+    Retry logic for retrieving transcripts to handle temporary failures.
+    """
+    for attempt in range(retries):
+        try:
+            return YouTubeTranscriptApi.get_transcript(video_id)
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                st.error(f"❌ Failed to retrieve transcript after {retries} attempts: {str(e)}")
+                return None
+
+def extract_transcript(video_id):
+    """
+    Enhanced transcript extraction with retry logic and improved error handling.
+    """
+    try:
+        # Retry logic to fetch transcript
+        transcript_list = retry_transcript_extraction(video_id)
+        if not transcript_list:
+            st.error("❌ Unable to retrieve transcript after multiple attempts.")
+            return None
+
+        # Format the transcript if available
+        formatted_transcript = []
+        for item in transcript_list:
+            timestamp = int(item["start"])
+            time_str = f"[{timestamp // 3600:02d}:{(timestamp % 3600) // 60:02d}:{timestamp % 60:02d}]"
+            formatted_transcript.append(f"{time_str} {item['text']}")
+        
+        return " ".join(formatted_transcript)
+
+    except Exception as e:
+        st.error(f"❌ Error accessing video transcript: {str(e)}")
+        return None
+
+
 
 def generate_content(text, prompt, retry_count=3):
     """Generate content using Gemini with enhanced error handling and content validation."""
@@ -982,7 +957,7 @@ def main():
         if video_id and transcript:
             # Only process if it's a new video
             if video_id != st.session_state.current_video_id:
-                video_title = get_youtube_title(video_id)
+                video_title = get_youtube_title(video_id, youtube_link)
                 
                 # Store current video information
                 st.session_state.current_video_id = video_id
