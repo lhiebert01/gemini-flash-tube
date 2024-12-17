@@ -46,6 +46,10 @@ if "video_count" not in st.session_state:
     st.session_state.video_count = 0
 if "query_count" not in st.session_state:
     st.session_state.query_count = 0
+if "fast_summary_generated" not in st.session_state:
+    st.session_state.fast_summary_generated = False
+    
+
     
 # Load environment variables and configure Gemini
 load_dotenv(override=True)
@@ -122,6 +126,14 @@ Format:
 - Skip any sections where no relevant content is found
 
 Please synthesize this complete summary: """
+
+FAST_SUMMARY_PROMPT = """Provide a concise executive summary of the video transcript. 
+- Limit the summary to 200-500 words. 
+- Focus on the main ideas, key insights, and central theme. 
+- Skip detailed quotes, technical terms, or extensive sections."""
+
+
+
 # Part 2: URL and Transcript Processing Functions
 
 def get_youtube_video_id(url):
@@ -725,49 +737,72 @@ def show_footer():
     """, unsafe_allow_html=True)
     st.markdown("---")
     
-
 def handle_video_analysis(video_id, transcript):
     """Process video analysis and display results."""
-    
+
     if st.session_state.video_count >= 3:
         st.error("🛑 Video analysis limit reached (3 videos per session)")
         return
-    
+
     # Display video thumbnail and title
     st.markdown('<div class="video-container">', unsafe_allow_html=True)
     st.image(f"http://img.youtube.com/vi/{st.session_state.current_video_id}/0.jpg",
-            use_container_width=True,
-            caption=st.session_state.current_video_title or "Video Thumbnail")
+             use_container_width=True,
+             caption=st.session_state.current_video_title or "Video Thumbnail")
     if st.session_state.current_video_title:
         st.markdown(f'<div style="text-align: center;">{st.session_state.current_video_title}</div>', 
-                   unsafe_allow_html=True)
+                    unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Generate button or show existing summary
-    if not st.session_state.video_processed:
-        if st.button("🚀 Generate Detailed Notes", type="primary", key="generate_button"):
-            # Add this line to increment video count
-            st.session_state.video_count += 1
-            with st.spinner("🔄 Analyzing video content..."):
-                summary = analyze_transcript(transcript)
-                if summary:
-                    st.session_state.current_summary = summary
-                    st.session_state.video_processed = True
-                    st.session_state.word_doc_binary = None  # Reset word doc binary
-                    st.rerun()
+    # Generate buttons
+    col1, col2 = st.columns(2)
+
+    # FAST SUMMARY BUTTON
+    with col1:
+        if st.button("⚡ Fast Video Summary", key="fast_summary_button"):
+            if not st.session_state.fast_summary_generated:
+                st.session_state.video_count += 1
+                with st.spinner("⏳ Generating fast summary..."):
+                    summary = generate_content(transcript, FAST_SUMMARY_PROMPT)
+                    if summary:
+                        st.session_state.current_summary = summary
+                        st.session_state.fast_summary_generated = True
+                        st.session_state.video_processed = False
+                        st.session_state.qa_history = []  # Reset Q&A history
+                        st.rerun()
+
+    # DETAILED SUMMARY BUTTON
+    with col2:
+        if st.button("🚀 Generate Detailed Notes", key="detailed_summary_button"):
+            if not st.session_state.video_processed:
+                st.session_state.video_count += 1
+                with st.spinner("🔄 Analyzing video content..."):
+                    summary = analyze_transcript(transcript)
+                    if summary:
+                        st.session_state.current_summary = summary
+                        st.session_state.video_processed = True
+                        st.session_state.fast_summary_generated = False
+                        st.session_state.word_doc_binary = None  # Reset word doc binary
+                        st.session_state.qa_history = []  # Reset Q&A history
+                        st.rerun()
 
 
 def handle_results_display():
     """Display analysis results and download options."""
-    if st.session_state.video_processed and st.session_state.current_summary:
+    if st.session_state.current_summary:
+        # Display success message
         st.success("✨ Summary generated successfully!")
         
-        st.markdown('<h2 class="section-header">📋 Detailed Notes</h2>', unsafe_allow_html=True)
+        # Display summary header and content
+        if st.session_state.video_processed:
+            st.markdown('<h2 class="section-header">📋 Detailed Notes</h2>', unsafe_allow_html=True)
+        elif st.session_state.fast_summary_generated:
+            st.markdown('<h2 class="section-header">⚡ Fast Video Summary</h2>', unsafe_allow_html=True)
+        
         st.markdown(st.session_state.current_summary)
         
-        # Download options
+        # Download options in the main window
         col1, col2 = st.columns(2)
-        
         with col1:
             markdown_content = create_markdown_download(
                 st.session_state.current_summary,
@@ -780,7 +815,7 @@ def handle_results_display():
                 data=markdown_content,
                 file_name=f"video_summary_{st.session_state.current_video_id}.md",
                 mime="text/markdown",
-                key="markdown_download"
+                key="markdown_download_main"
             )
         with col2:
             if st.session_state.word_doc_binary is None:
@@ -799,53 +834,76 @@ def handle_results_display():
                 data=st.session_state.word_doc_binary,
                 file_name=f"video_summary_{st.session_state.current_video_id}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="word_download"
+                key="word_download_main"
             )
-
+        
+        # Download options in the sidebar
+        st.sidebar.markdown("### 📥 Download Summary")
+        st.sidebar.download_button(
+            label="📥 Download Markdown",
+            data=markdown_content,
+            file_name=f"video_summary_{st.session_state.current_video_id}.md",
+            mime="text/markdown",
+            key="markdown_download_sidebar"
+        )
+        st.sidebar.download_button(
+            label="📄 Download Word",
+            data=st.session_state.word_doc_binary,
+            file_name=f"video_summary_{st.session_state.current_video_id}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="word_download_sidebar"
+        )
+        
 def handle_qa_section():
     """Handle Q&A functionality."""
-    
+
     if st.session_state.query_count >= 5:
         st.error("🛑 Question limit reached (5 questions per session)")
         return
-    
+
+    # Ensure that a summary (Fast or Detailed) has been generated
+    if not st.session_state.current_summary:
+        st.warning("⚠️ Generate a summary first to enable Q&A functionality.")
+        return
+
     st.markdown('<h2 class="section-header">❓ Ask Questions About the Video</h2>', 
                unsafe_allow_html=True)
-    
+
     # Display existing Q&A history
     if st.session_state.qa_history:
         st.markdown("### Previous Questions & Answers")
         for qa in st.session_state.qa_history:
             st.markdown(f"**Q: {qa['question']}**")
             st.markdown(f"A: {qa['answer']}\n")
-    
-    # Create the text input with a default value based on clear_input state
+
+    # Input box for the user's question
     user_question = st.text_input(
-        "Enter your question:", 
-        key="qa_input",
-        value="" if st.session_state.clear_input else st.session_state.get("qa_input", "")
+        "Enter your question:",
+        key="qa_input"
     )
-    
-    # Reset the clear_input flag
-    st.session_state.clear_input = False
-    
-    if user_question:
-        # Add this line to increment query count
+
+    # Process user question only if input is not empty and it's a new input
+    if user_question and st.session_state.get("last_qa_input", "") != user_question:
+        # Save the input to prevent repeated processing
+        st.session_state.last_qa_input = user_question
+
+        # Increment query count
         st.session_state.query_count += 1
+
+        # Use the current summary (Fast or Detailed)
+        summary = st.session_state.current_summary
+        transcript = st.session_state.current_transcript
+
         with st.spinner("🤔 Analyzing your question..."):
-            answer = generate_qa_response(
-                user_question,
-                st.session_state.current_transcript,
-                st.session_state.current_summary
-            )
+            answer = generate_qa_response(user_question, transcript, summary)
             if answer:
                 # Add to Q&A history
                 st.session_state.qa_history.append({
                     "question": user_question,
                     "answer": answer
                 })
-                
-                # Update the word document binary
+
+                # Update the Word document binary
                 doc = create_word_document(
                     st.session_state.current_summary,
                     st.session_state.current_video_title,
@@ -855,14 +913,11 @@ def handle_qa_section():
                 bio = io.BytesIO()
                 doc.save(bio)
                 st.session_state.word_doc_binary = bio.getvalue()
-                
-                # Show the new answer
+
+                # Display the latest answer
                 st.markdown("### 💡 Latest Answer")
                 st.markdown(answer)
-                
-                # Set the clear_input flag to True
-                st.session_state.clear_input = True
-                st.rerun()
+
                 
 def show_usage_stats():
     """Display usage statistics."""
@@ -917,8 +972,8 @@ def main():
             # Display results if available
             handle_results_display()
             
-            # Show Q&A section if video has been processed
-            if st.session_state.video_processed:
+            # Show Q&A section if either a Fast Summary or Detailed Notes are generated
+            if st.session_state.video_processed or st.session_state.fast_summary_generated:
                 handle_qa_section()
     
     # Show footer
