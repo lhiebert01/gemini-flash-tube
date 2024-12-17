@@ -2,6 +2,7 @@
 
 import streamlit as st
 import os
+import googleapiclient.discovery
 from dotenv import load_dotenv
 import google.generativeai as genai
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -54,6 +55,15 @@ if "fast_summary_generated" not in st.session_state:
 # Load environment variables and configure Gemini
 load_dotenv(override=True)
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# Validate API keys
+if not os.getenv("GOOGLE_API_KEY"):
+    st.error("Google API key is missing. Check your environment configuration.")
+    st.stop()
+
+if not os.getenv("YOUTUBE_API_KEY"):
+    st.error("YouTube API key is missing. Check your environment configuration.")
+    st.stop()
 
 # Constants for prompts
 # Update CHUNK_PROMPT for better quote extraction
@@ -187,20 +197,38 @@ def get_youtube_video_id(url):
     
     return None
 
+import googleapiclient.discovery
+
 def get_youtube_title(video_id):
-    """Get YouTube video title with enhanced error handling."""
+    """Fetch video title using YouTube Data API v3."""
     try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        title = soup.find('meta', property='og:title')
-        return title['content'] if title else None
-    except Exception as e:
-        st.warning(f"Could not extract video title: {str(e)}")
+        api_service_name = "youtube"
+        api_version = "v3"
+        youtube_api_key = os.getenv("YOUTUBE_API_KEY")
+
+        youtube = googleapiclient.discovery.build(
+            api_service_name, api_version, developerKey=youtube_api_key
+        )
+
+        request = youtube.videos().list(part="snippet", id=video_id)
+        response = request.execute()
+
+        if "items" not in response or not response["items"]:
+            st.error("No video data found. Please check the video ID or URL.")
+            return None
+
+        title = response["items"][0]["snippet"]["title"]
+        return title
+    except googleapiclient.errors.HttpError as e:
+        if e.resp.status == 403:
+            st.error("YouTube API rate limit exceeded. Try again later.")
+        else:
+            st.error(f"An error occurred: {e}")
         return None
+    except Exception as e:
+        st.warning(f"⚠️ Could not retrieve video title: {str(e)}")
+        return None
+
 
 def extract_transcript(video_id):
     """
